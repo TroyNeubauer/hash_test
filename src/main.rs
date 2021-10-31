@@ -1,7 +1,3 @@
-#![feature(bigint_helper_methods)]
-//! Helper simulation to see how good pointer values are when used as a hash.
-//!
-//! Turns out they are very good
 
 use std::{collections::hash_map::DefaultHasher, hash::Hasher};
 
@@ -12,6 +8,7 @@ const NUM_SHARDS: usize = 8;
 const IGNORED_LOW_BITS: u8 = 8;
 const SHARD_MASK: usize = NUM_SHARDS - 1;
 
+//How big the objects "protected" by hazard pointers in our simulation are
 const MOCK_SIZE: usize = 32;
 const MOCK_ELEMENTS: usize = MOCK_SIZE / 8;
 
@@ -42,12 +39,12 @@ fn main() {
 
     let mut dummy_allocations: Vec<Vec<usize>> = Vec::new();
     let mut mock_objects: Vec<Vec<usize>> = Vec::new();
+    //Push some mock objects so that we have a healthy pool to choose a random one from
     for _ in 0..100 {
         mock_objects.push(Vec::with_capacity(MOCK_ELEMENTS));
     }
 
-    //Returns simulated input hash values based on the address of a real allocation and the size of
-    //a mock allocation
+    //Returns simulated input hash values based on the address of a real allocation
     let mut generate_hash_input = || {
         let mut rng = rand::thread_rng();
         if rng.gen_ratio(5, 100) {
@@ -61,12 +58,16 @@ fn main() {
             dummy_allocations.clear();
         }
 
-        //Pick a random object to `retire`
-        let address = mock_objects[rng.gen_range(0..mock_objects.len())].as_ptr();
+        //Pick a random object to "retire"
+        let index = rng.gen_range(0..mock_objects.len());
+        let address = mock_objects[index].as_ptr();
 
-        //Add a new one and remove an old one so that we rotate through the address space
-        mock_objects.push(Vec::with_capacity(MOCK_ELEMENTS));
-        let _to_delete = mock_objects.swap_remove(rng.gen_range(0..mock_objects.len()));
+        //Add a new object, deleting the old one
+        //The old vec's data pointer is technically released here, where as in the hazard pointers
+        //codebase, we obtain the address when retiring, while the object is freed sometime later.
+        //This should not make a difference in practice because we do not allocate more objects until
+        //next time, and address is only used as a source of entropy for our hash functions
+        mock_objects[index] = Vec::with_capacity(MOCK_ELEMENTS);
 
         address as usize
     };
